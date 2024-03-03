@@ -39,12 +39,12 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.source.as_ref() {
             None => {
-                write!(f, "At line {}: {}", self.line, self.msg)
+                write!(f, "Line {}: {}.", self.line, self.msg)
             }
             Some(source) => {
                 write!(
                     f,
-                    "[ At line {}: {} ]\n{}",
+                    "[ Line {}: {} ]\n{}",
                     self.line,
                     self.msg,
                     source.as_ref()

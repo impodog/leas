@@ -11,7 +11,7 @@ pub enum Enclosing {
 pub enum Operator {
     Left,
     Right,
-    Mono,
+    Unary,
 }
 
 #[derive(Debug, Clone)]
@@ -27,8 +27,15 @@ pub enum Token {
     Null,
     Str(String),
 
+    Stop,
+
     Dot,
+    Colon,
+    Fn,
+    Pc,
+    Neg,
     Call,
+    List,
     Asn,
 }
 
@@ -43,13 +50,16 @@ pub enum Slice {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    End(usize),
-
-    Token(Token),
+    Token(Token, usize),
     Block(VecDeque<Stmt>),
+    Empty,
 
     Dot(Box<Stmt>, Box<Stmt>),
+    Colon(Box<Stmt>, Box<Stmt>),
+    Fn(Box<Stmt>, Rc<Stmt>, bool),
+    Neg(Box<Stmt>),
     Call(Box<Stmt>, Box<Stmt>),
+    List(Box<Stmt>, Box<Stmt>),
     Asn(Box<Stmt>, Box<Stmt>),
 }
 
@@ -76,7 +86,11 @@ impl Token {
     pub fn priority(&self) -> u8 {
         match self {
             Self::Dot => 1,
-            Self::Call => 10,
+            Self::Colon => 2,
+            Self::Fn | Self::Pc => 5,
+            Self::Neg => 10,
+            Self::List => 50,
+            Self::Call => 20,
             Self::Asn => 200,
             _ => 0,
         }
@@ -84,18 +98,38 @@ impl Token {
 
     pub fn attr(&self) -> Option<Operator> {
         match self {
-            Self::Dot | Self::Call => Some(Operator::Left),
-            Self::Asn => Some(Operator::Right),
+            Self::Dot | Self::Colon | Self::Fn | Self::Pc | Self::Call => Some(Operator::Left),
+            Self::List | Self::Asn => Some(Operator::Right),
+            Self::Neg => Some(Operator::Unary),
             _ => None,
         }
     }
 
     pub fn to_stmt_fn(&self) -> fn(Box<Stmt>, Box<Stmt>) -> Stmt {
+        fn fn_fn(left: Box<Stmt>, right: Box<Stmt>) -> Stmt {
+            Stmt::Fn(left, Rc::new(*right), false)
+        }
+
+        fn pc_fn(left: Box<Stmt>, right: Box<Stmt>) -> Stmt {
+            Stmt::Fn(left, Rc::new(*right), true)
+        }
+
         match self {
             Self::Dot => Stmt::Dot,
+            Self::Colon => Stmt::Colon,
+            Self::Fn => fn_fn,
+            Self::Pc => pc_fn,
             Self::Call => Stmt::Call,
+            Self::List => Stmt::List,
             Self::Asn => Stmt::Asn,
-            _ => panic!("Cannot convert {:?} to stmt function", self),
+            _ => panic!("Cannot convert {:?} to binary stmt function", self),
+        }
+    }
+
+    pub fn to_stmt_unary_fn(&self) -> fn(Box<Stmt>) -> Stmt {
+        match self {
+            Self::Neg => Stmt::Neg,
+            _ => panic!("Cannot convert {:?} to unary stmt function", self),
         }
     }
 
@@ -128,6 +162,21 @@ impl Enclosing {
             Enclosing::Paren => ')',
             Enclosing::Bracket => ']',
             Enclosing::Brace => '}',
+        }
+    }
+}
+
+impl Stmt {
+    pub fn as_word(&self, map: &mut Map) -> Option<String> {
+        match self {
+            Self::Token(token, line) => {
+                map.set_line(*line);
+                match token {
+                    Token::Word(name) => Some(name.to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 }

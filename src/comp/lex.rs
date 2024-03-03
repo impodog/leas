@@ -25,8 +25,8 @@ impl<'s> Compilable<'s> {
                 Status::Normal => match c {
                     ' ' | '\t' => true,
                     '\n' => {
-                        stream.push(Token::End(line));
                         line += 1;
+                        stream.push(Token::End(line));
                         true
                     }
                     '(' | '[' | '{' => {
@@ -71,6 +71,14 @@ impl<'s> Compilable<'s> {
                         stream.push(Token::Dot);
                         true
                     }
+                    ':' => {
+                        stream.push(Token::Colon);
+                        true
+                    }
+                    ',' => {
+                        stream.push(Token::List);
+                        true
+                    }
                     '=' => {
                         stream.push(Token::Asn);
                         true
@@ -106,16 +114,20 @@ impl<'s> Compilable<'s> {
                         true
                     }
                     _ => {
-                        let num: Int = buffer.parse().map_err(|err| {
-                            Error::with_source(
-                                err,
-                                format!("When parsing integer {:?}", buffer),
-                                line,
-                            )
-                        })?;
-                        stream.push(Token::Int(num));
-                        buffer.clear();
+                        if buffer.chars().last().unwrap() == '-' {
+                            stream.push(Token::Neg);
+                        } else {
+                            let num: Int = buffer.parse().map_err(|err| {
+                                Error::with_source(
+                                    err,
+                                    format!("When parsing integer {:?}", buffer),
+                                    line,
+                                )
+                            })?;
+                            stream.push(Token::Int(num));
+                        }
                         status = Status::Normal;
+                        buffer.clear();
                         false
                     }
                 },
@@ -186,7 +198,21 @@ impl<'s> Compilable<'s> {
                         true
                     }
                     _ => {
-                        stream.push(Token::Word(std::mem::replace(&mut buffer, String::new())));
+                        match buffer.as_str() {
+                            "true" => stream.push(Token::Bool(true)),
+                            "false" => stream.push(Token::Bool(false)),
+                            "null" => stream.push(Token::Null),
+                            "stop" => stream.push(Token::Stop),
+                            "fn" => stream.push(Token::Fn),
+                            "pc" => stream.push(Token::Pc),
+                            _ => {
+                                stream.push(Token::Word(std::mem::replace(
+                                    &mut buffer,
+                                    String::new(),
+                                )));
+                            }
+                        }
+                        buffer.clear();
                         status = Status::Normal;
                         false
                     }

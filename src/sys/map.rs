@@ -3,12 +3,14 @@ use super::*;
 #[derive(Debug)]
 pub struct Map {
     data: HashMap<String, Value>,
+    line: usize,
 }
 
 impl Map {
     fn new() -> Self {
         Self {
             data: HashMap::new(),
+            line: 1,
         }
     }
 
@@ -23,32 +25,18 @@ impl Map {
     pub fn rem(&mut self, k: &str) -> Option<Value> {
         self.data.remove(k)
     }
+
+    pub fn set_line(&mut self, line: usize) {
+        self.line = line;
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
+    }
 }
 
 impl Default for Map {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Resource {
-    pub fn new_map() -> Self {
-        Self::new(Map::new())
-    }
-
-    pub fn visit_map<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(Ref<Map>) -> R,
-        R: 'static,
-    {
-        self.visit(f)
-    }
-
-    pub fn visit_mut_map<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(RefMut<Map>) -> R,
-        R: 'static,
-    {
-        self.visit_mut(f)
     }
 }

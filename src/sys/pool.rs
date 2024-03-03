@@ -27,33 +27,31 @@ impl Resource {
         Self(Rc::new(RefCell::new(value)))
     }
 
-    pub fn visit<T, F, R>(&self, f: F) -> R
+    pub fn visit<T, F, R>(&self, f: F) -> Option<R>
     where
-        T: Sized + 'static,
-        F: FnOnce(Ref<T>) -> R,
+        T: 'static,
+        F: FnOnce(&T) -> R,
         R: 'static,
     {
-        f(self
+        Some(f(&self
             .0
             .as_ref()
             .as_any()
-            .downcast_ref::<RefCell<T>>()
-            .unwrap()
-            .borrow())
+            .downcast_ref::<RefCell<T>>()?
+            .borrow()))
     }
 
-    pub fn visit_mut<T, F, R>(&self, f: F) -> R
+    pub fn visit_mut<T, F, R>(&self, f: F) -> Option<R>
     where
-        T: Sized + 'static,
-        F: FnOnce(RefMut<T>) -> R,
+        T: 'static,
+        F: FnOnce(&mut T) -> R,
         R: 'static,
     {
-        f(self
+        Some(f(&mut self
             .0
             .as_ref()
             .as_any()
-            .downcast_ref::<RefCell<T>>()
-            .unwrap()
-            .borrow_mut())
+            .downcast_ref::<RefCell<T>>()?
+            .borrow_mut()))
     }
 }

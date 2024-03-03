@@ -1,11 +1,12 @@
 use leas::prelude::*;
+use rt::Eval;
 
 fn open<T>(result: sys::Result<T>) -> T {
     match result {
         Ok(v) => v,
         Err(err) => {
             println!("{}", err);
-            panic!()
+            panic!("Error occurred.")
         }
     }
 }
@@ -19,4 +20,7 @@ fn main() {
     println!("Output slice: {:?}", sliced.0);
     let cooked = open(sliced.cook());
     println!("Output cooked: {:?}", cooked.0);
+    let mut map = sys::Map::default();
+    let result = open(cooked.0.eval(&mut map));
+    println!("Output result: {:?}", result);
 }

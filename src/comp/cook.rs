@@ -42,8 +42,8 @@ impl Slice {
                                 }
                                 ops.push_back(token);
                             }
-                            Operator::Mono => {
-                                result.push_back(Slice::Token(token));
+                            Operator::Unary => {
+                                ops.push_back(token);
                             }
                         }
 
@@ -52,6 +52,7 @@ impl Slice {
                 }
                 Slice::End(num) => {
                     line.set(num);
+                    result.push_back(Slice::End(num));
                     None
                 }
                 _ => Some(slice),
@@ -77,26 +78,40 @@ impl Slice {
 
     fn cook_line_ops(slice: VecDeque<Slice>, line: &LineRef) -> Result<Stmt> {
         let slice = Self::make_suffix(line, slice);
-        println!("Suffix: {:?}", slice);
         let mut nodes = VecDeque::new();
 
         for slice in slice {
             match slice {
-                Slice::Token(token) => {
-                    if token.is_op() {
-                        let right = nodes.pop_back().ok_or(Error::new(
-                            format!("Missing operand for operator {:?}", token),
-                            line.get(),
-                        ))?;
-                        let left = nodes.pop_back().ok_or(Error::new(
-                            format!("Missing operand for operator {:?}", token),
-                            line.get(),
-                        ))?;
-                        nodes.push_back(token.to_stmt_fn()(Box::new(left), Box::new(right)));
-                    } else {
-                        nodes.push_back(Stmt::Token(token));
+                Slice::Token(token) => match token.attr() {
+                    Some(Operator::Unary) => {
+                        let operand = nodes.pop_back().ok_or_else(|| {
+                            Error::new(
+                                format!("Missing operand for unary operator {:?}", token),
+                                line.get(),
+                            )
+                        })?;
+                        nodes.push_back(token.to_stmt_unary_fn()(Box::new(operand)));
                     }
-                }
+                    Some(_) => {
+                        let right = nodes.pop_back().ok_or_else(|| {
+                            Error::new(
+                                format!("Missing operand for binary operator {:?}", token),
+                                line.get(),
+                            )
+                        })?;
+                        let left = nodes.pop_back().ok_or_else(|| {
+                            Error::new(
+                                format!("Missing operand for binary operator {:?}", token),
+                                line.get(),
+                            )
+                        })?;
+                        nodes.push_back(token.to_stmt_fn()(Box::new(left), Box::new(right)));
+                    }
+                    None => {
+                        nodes.push_back(Stmt::Token(token, line.get()));
+                    }
+                },
+
                 Slice::End(num) => {
                     line.set(num);
                 }
@@ -108,9 +123,8 @@ impl Slice {
             1 => Ok(nodes.pop_back().unwrap()),
             _ => Err(Error::new(
                 format!(
-                    "Incorrect number of nodes({}, {:?}) are found. Is there an operator unclosed?",
+                    "Incorrect number({}) of nodes are found. Is there an operator unclosed?",
                     nodes.len(),
-                    nodes
                 ),
                 line.get(),
             )),
@@ -119,25 +133,21 @@ impl Slice {
 
     fn cook(self, line: &LineRef) -> Result<Stmt> {
         match self {
-            Slice::Token(token) => {
-                if token.modify_line(line) {
-                    if let Token::End(line) = token {
-                        Ok(Stmt::End(line))
-                    } else {
-                        unreachable!()
-                    }
+            Slice::Token(token) => Ok(Stmt::Token(token, line.get())),
+            Slice::Line(slice) => Self::cook_line_ops(slice, line),
+            Slice::Block(slice) => {
+                if slice.is_empty() {
+                    Ok(Stmt::Empty)
                 } else {
-                    Ok(Stmt::Token(token))
+                    Ok(Stmt::Block(
+                        slice
+                            .into_iter()
+                            .map(|slice| slice.cook(line))
+                            .collect::<Result<VecDeque<_>>>()?,
+                    ))
                 }
             }
-            Slice::End(line) => Ok(Stmt::End(line)),
-            Slice::Line(slice) => Self::cook_line_ops(slice, line),
-            Slice::Block(slice) => Ok(Stmt::Block(
-                slice
-                    .into_iter()
-                    .map(|slice| slice.cook(line))
-                    .collect::<Result<VecDeque<_>>>()?,
-            )),
+            Slice::End(num) => Err(Error::new("Unexpected end token".to_string(), num)),
         }
     }
 }
