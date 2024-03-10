@@ -20,7 +20,14 @@ fn main() {
     println!("Output slice: {:?}", sliced.0);
     let cooked = open(sliced.cook());
     println!("Output cooked: {:?}", cooked.0);
-    let mut map = sys::Map::default();
+    let mut map = sys::Map::new();
+    map.register(
+        "print",
+        sys::Func::new(|map, v| {
+            println!("{:?}", v);
+            Ok(map.req("self").unwrap().clone())
+        }),
+    );
     let result = open(cooked.0.eval(&mut map));
     println!("Output result: {:?}", result);
 }

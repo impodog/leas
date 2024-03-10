@@ -14,6 +14,7 @@ pub enum Value {
     Null,
     Stop,
     Res(Resource),
+    Weak(WeakResource),
 }
 
 impl Value {
@@ -52,15 +53,32 @@ impl Value {
         }
     }
 
-    pub fn as_res(&self) -> Option<&Resource> {
+    pub fn as_res(&self) -> Option<Resource> {
         match self {
-            Self::Res(res) => Some(res),
+            Self::Res(res) => Some(res.clone()),
+            Self::Weak(weak) => weak.upgrade(),
             _ => None,
         }
     }
 
-    pub fn call(&self, map: &mut Map, value: VecDeque<Value>) -> Option<Result<Value>> {
-        self.as_res()?
-            .visit_mut_func(move |f| Some((f.f)(map, value)))?
+    pub fn downgrade(self) -> Self {
+        match self {
+            Self::Res(res) => Self::Weak(res.downgrade()),
+            _ => self,
+        }
+    }
+
+    pub fn upgrade(self) -> Option<Self> {
+        match self {
+            Self::Weak(weak) => weak.upgrade().map(Self::Res),
+            _ => Some(self),
+        }
+    }
+
+    pub fn call(&self, map: &mut Map, value: Value) -> Option<Result<Value>> {
+        map.push("self", self.clone());
+        let result = self.as_res()?.visit_mut_func(|f| Some((f.f)(map, value)));
+        map.pop("self");
+        result?
     }
 }

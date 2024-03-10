@@ -39,7 +39,7 @@ impl<'s> Compilable<'s> {
                             if left != Enclosing::from(c) {
                                 return Err(Error::new(
                                     format!(
-                                        "Cannot match previous deliminator {:?} and {:?}",
+                                        "Unmatched previous deliminator {:?} and {:?}",
                                         left.to_left(),
                                         c
                                     ),
@@ -105,7 +105,6 @@ impl<'s> Compilable<'s> {
                             Error::with_source(
                                 err,
                                 format!("When parsing unsigned integer {:?}", buffer),
-                                line,
                             )
                         })?;
                         stream.push(Token::Uint(num));
@@ -114,14 +113,13 @@ impl<'s> Compilable<'s> {
                         true
                     }
                     _ => {
-                        if buffer.chars().last().unwrap() == '-' {
+                        if buffer.ends_with('-') {
                             stream.push(Token::Neg);
                         } else {
                             let num: Int = buffer.parse().map_err(|err| {
                                 Error::with_source(
                                     err,
                                     format!("When parsing integer {:?}", buffer),
-                                    line,
                                 )
                             })?;
                             stream.push(Token::Int(num));
@@ -137,12 +135,11 @@ impl<'s> Compilable<'s> {
                         true
                     }
                     _ => {
-                        if buffer.chars().last().unwrap() == '.' {
+                        if buffer.ends_with('.') {
                             let num: Int = buffer[0..buffer.len() - 1].parse().map_err(|err| {
                                 Error::with_source(
                                     err,
                                     format!("When parsing integer {:?}", buffer),
-                                    line,
                                 )
                             })?;
                             stream.push(Token::Int(num));
@@ -152,7 +149,6 @@ impl<'s> Compilable<'s> {
                                 Error::with_source(
                                     err,
                                     format!("When parsing floating number {:?}", buffer),
-                                    line,
                                 )
                             })?;
                             stream.push(Token::Float(num));
@@ -179,10 +175,7 @@ impl<'s> Compilable<'s> {
                                 status = Status::Str(true);
                             }
                             '\"' => {
-                                stream.push(Token::Str(std::mem::replace(
-                                    &mut buffer,
-                                    String::new(),
-                                )));
+                                stream.push(Token::Str(std::mem::take(&mut buffer)));
                                 status = Status::Normal;
                             }
                             _ => {
@@ -203,13 +196,15 @@ impl<'s> Compilable<'s> {
                             "false" => stream.push(Token::Bool(false)),
                             "null" => stream.push(Token::Null),
                             "stop" => stream.push(Token::Stop),
+                            "import" => stream.push(Token::Import),
+                            "include" => stream.push(Token::Include),
+                            "map" => stream.push(Token::Map),
                             "fn" => stream.push(Token::Fn),
-                            "pc" => stream.push(Token::Pc),
+                            "move" => stream.push(Token::Move),
+                            "acq" => stream.push(Token::Acq),
+                            "return" => stream.push(Token::Return),
                             _ => {
-                                stream.push(Token::Word(std::mem::replace(
-                                    &mut buffer,
-                                    String::new(),
-                                )));
+                                stream.push(Token::Word(std::mem::take(&mut buffer)));
                             }
                         }
                         buffer.clear();

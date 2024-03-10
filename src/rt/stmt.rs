@@ -5,10 +5,43 @@ impl Stmt {
     where
         F: FnMut(&mut Map, &Self) -> Result<()>,
     {
-        f(map, left)?;
+        match left {
+            Self::Token(Token::Stop, line) => {
+                map.set_line(*line);
+                return Ok(());
+            }
+            _ => {
+                f(map, left)?;
+            }
+        }
         match right {
             Self::List(left, right) => Self::open_list(map, left, right, f)?,
-            Self::Token(Token::Stop, _) => {}
+            Self::Token(Token::Stop, line) => {
+                map.set_line(*line);
+            }
+            _ => f(map, right)?,
+        }
+        Ok(())
+    }
+
+    fn open_dot<F>(map: &mut Map, left: &Self, right: &Self, mut f: F) -> Result<()>
+    where
+        F: FnMut(&mut Map, &Self) -> Result<()>,
+    {
+        match left {
+            Self::Token(Token::Stop, line) => {
+                map.set_line(*line);
+                return Ok(());
+            }
+            _ => {
+                f(map, left)?;
+            }
+        }
+        match right {
+            Self::Dot(left, right) => Self::open_dot(map, left, right, f)?,
+            Self::Token(Token::Stop, line) => {
+                map.set_line(*line);
+            }
             _ => f(map, right)?,
         }
         Ok(())
@@ -21,6 +54,144 @@ impl Stmt {
         ))
     }
 
+    fn eval_import(map: &mut Map, opd: &Self) -> Result<Value> {
+        let mut stack = Vec::new();
+        let name = if let Stmt::Dot(left, right) = opd {
+            let mut result = String::new();
+            Self::open_dot(map, left, right, |map, stmt| {
+                let str = stmt.as_word_or_string(map)?;
+                result.push_str(&str);
+                result.push('/');
+                stack.push(str);
+                Ok(())
+            })
+            .map_err(|err| err.with("When importing"))?;
+            result.pop();
+            result
+        } else {
+            let name = opd
+                .as_word_or_string(map)
+                .map_err(|err| err.with("When importing"))?;
+            stack.push(name.clone());
+            name
+        };
+
+        let path = map
+            .env()
+            .find_module(&name)
+            .ok_or_else(|| Error::new(format!("Module {:?} not found", name), map.line()))?;
+
+        let (mut res_map, result) = match map.env().get_import(&path) {
+            Some(res) => (res, None),
+            None => {
+                let content = std::fs::read_to_string(&path).map_err(|err| {
+                    Error::with_source(err, format!("When reading module {:?}", path))
+                })?;
+
+                let stmt = Compilable::new(&content)
+                    .compile()
+                    .map_err(|err| err.with(format!("When compiling module {:?}", path)))?;
+
+                let mut new_map = Map::new_under(map);
+                new_map.env().forward_base(path.clone());
+                let result = stmt
+                    .eval(&mut new_map)
+                    .map_err(|err| err.with(format!("When evaluating module {:?}", path)))?;
+                new_map.env().backward_base();
+
+                let res_map = Resource::new(new_map);
+                map.env().set_import(path, &res_map);
+
+                (res_map, Some(result))
+            }
+        };
+
+        while stack.len() > 1 {
+            let name = stack.pop().unwrap();
+            let new_map = Resource::new(Map::new_under(map));
+            new_map.visit_mut(|map: &mut Map| map.set(name, Value::Res(res_map.clone())));
+            res_map = new_map;
+        }
+
+        map.set(stack.pop().unwrap(), Value::Res(res_map.clone()));
+
+        Ok(result.unwrap_or_else(|| Value::Null))
+    }
+
+    fn eval_include(map: &mut Map, opd: &Self) -> Result<Value> {
+        let name = if let Stmt::Dot(left, right) = opd {
+            let mut result = String::new();
+            Self::open_dot(map, left, right, |map, stmt| {
+                result.push_str(&stmt.as_word_or_string(map)?);
+                result.push('/');
+                Ok(())
+            })
+            .map_err(|err| err.with("When including"))?;
+            result.pop();
+            result
+        } else {
+            opd.as_word_or_string(map)
+                .map_err(|err| err.with("When including"))?
+        };
+
+        let path = map
+            .env()
+            .find_module(&name)
+            .ok_or_else(|| Error::new(format!("Module {:?} not found", name), map.line()))?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|err| Error::with_source(err, format!("When reading module {:?}", path)))?;
+
+        Compilable::new(&content)
+            .compile()
+            .map_err(|err| err.with(format!("When compiling module {:?}", path)))?
+            .eval(map)
+    }
+
+    fn eval_map(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        let left = left
+            .eval(map)
+            .map_err(|err| err.with("When mapping outside constants into new map"))?;
+        let mut new_map = Map::new_under(map);
+        new_map.push("arg", left);
+        let use_shared = if let Some(shared) = map.get("shared") {
+            new_map.push("shared", shared.clone().downgrade());
+            true
+        } else {
+            false
+        };
+        let result = right.eval(&mut new_map);
+        if use_shared {
+            new_map.pop("shared");
+        }
+        new_map.pop("arg");
+        result?;
+        Ok(Value::Res(Resource::new(new_map)))
+    }
+
+    fn eval_fn(map: &mut Map, body: &Rc<Self>) -> Result<Value> {
+        let body = body.clone();
+        let shared = map.get("shared").map(|value| value.clone().downgrade());
+
+        let f = move |map: &mut Map, arg: Value| -> Result<Value> {
+            map.push("arg", arg);
+            let use_shared = if let Some(shared) = shared.clone() {
+                map.push("shared", shared);
+                true
+            } else {
+                false
+            };
+
+            let result = body.eval(map);
+
+            if use_shared {
+                map.pop("shared");
+            }
+            map.pop("arg");
+            result
+        };
+        Ok(Value::Res(Resource::new_func(Func::new(f))))
+    }
+
     fn eval_list(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
         let mut result = VecDeque::new();
         Self::open_list(map, left, right, |map, stmt| {
@@ -30,104 +201,11 @@ impl Stmt {
         Ok(Value::Res(Resource::new(result)))
     }
 
-    fn eval_fn(map: &mut Map, left: &Self, right: &Self, is_proc: bool) -> Result<Value> {
-        let mut params = VecDeque::new();
-        let mut len = 0;
-        match left {
-            Self::Empty => {}
-            Self::List(left, right) => {
-                Self::open_list(map, left, right, |map, stmt| {
-                    match stmt {
-                        Self::Token(token, line) => {
-                            map.set_line(*line);
-                            match token {
-                                Token::Word(word) => {
-                                    params.push_back((word.clone(), None));
-                                    len += 1;
-                                    Ok(())
-                                }
-                                _ => {
-                                    Err(Error::new(
-                                        format!("Cannot evaluate function param {:?}. Only words are accepted", stmt),
-                                        map.line(),
-                                    )) 
-                                }
-                            }
-                        }
-                        Self::Colon(left, right) => {
-                            let name = left.as_word(map).ok_or_else(|| Error::new(format!("Cannot use {:?} as a function environment name", left), map.line()))?;
-                            let value = right.eval(map)?;
-                            params.push_back((name, Some(value)));
-                            Ok(())
-                        }
-                        _ => Err(Error::new(
-                            format!("Cannot evaluate function param {:?}. Only words are accepted", stmt),
-                            map.line(),
-                        )),
-                    }
-                })?;
-            }
-            Self::Token(token,line) => {
-                map.set_line(*line);
-                match token {
-                    Token::Word(name) => {
-                        params.push_back((name.clone(), None));
-                        len += 1;
-                    }
-                    _ => {
-                        return Err(Error::new(format!("Cannot evaluate function param {:?}. Only words are accepted", left), map.line()))
-                    }
-                }
-            }
-            _ => {
-                return Err(Error::new(
-                    format!("Cannot evaluate function params {:?}, please use parentheses enclosed expression", left),
-                    map.line(),
-                ))
-            }
-        }
-
-        let body = right.clone();
-        let f = move |map: &mut Map, args: VecDeque<Value>| {
-            if args.len() != len {
-                Err(Error::new(
-                    format!(
-                        "Incorrect number of arguments are found. Expected {}, but found {}",
-                        len,
-                        args.len()
-                    ),
-                    map.line(),
-                ))
-            } else {
-                let old_map = if !is_proc {
-                    Some(std::mem::take(map))
-                } else {
-                    None
-                };
-
-                let params = params.iter();
-                let mut args = args.iter();
-
-                for (param, default) in params {
-                    match default {
-                        Some(value) => {
-                            map.set(param.clone(), value.clone());
-                        }
-                        None => {
-                            let arg = args.next().unwrap();
-                            map.set(param.clone(), arg.clone());
-                        }
-                    }
-                }
-                let result = body.eval(map);
-                if let Some(mut old_map) = old_map {
-                    old_map.set_line(map.line());
-                    let _ = std::mem::replace(map, old_map);
-                }
-                result
-            }
-        };
-        Ok(Value::Res(Resource::new_func(Func::new(f))))
+    fn eval_move(map: &mut Map, opd: &Self) -> Result<Value> {
+        let name = opd
+            .as_word_or_string(map)
+            .map_err(|err| err.with("When moving"))?;
+        Ok(map.rem(&name).unwrap_or_else(|| Value::Stop))
     }
 }
 
@@ -141,33 +219,40 @@ impl Eval for Stmt {
             Self::Block(block) => {
                 let mut result = Value::Null;
                 for stmt in block {
-                    result = stmt.eval(map)?;
+                    match stmt {
+                        Self::Return(value) => {
+                            return Ok(value.eval(map)?);
+                        }
+                        _ => {
+                            result = stmt.eval(map)?;
+                        }
+                    }
                 }
                 Ok(result)
             }
             Self::Empty => Ok(Value::Null),
             Self::Dot(_, _) => self.get(map),
             Self::Colon(left, right) => Self::eval_colon(map, left, right),
+            Self::Import(opd) => Self::eval_import(map, opd),
+            Self::Include(opd) => Self::eval_include(map, opd),
+            Self::Map(left, right) => Self::eval_map(map, left, right),
+            Self::Fn(body) => Self::eval_fn(map, body),
             Self::Neg(_opd) => {
                 todo!()
             }
-            Self::Fn(left, right, is_proc) => Self::eval_fn(map, left, right, *is_proc),
+            Self::Move(opd) => Self::eval_move(map, opd),
+            Self::Acq(opd) => Ok(opd
+                .eval(map)?
+                .upgrade()
+                .ok_or_else(|| Error::new("Attempted to acquire deleted value", map.line()))?),
+            Self::Return(opd) => Ok(opd
+                .eval(map)?
+                .upgrade()
+                .ok_or_else(|| Error::new("Attempted to return deleted value", map.line()))?),
             Self::Call(left, right) => {
                 let left = left.eval(map)?;
-                let mut args = VecDeque::new();
-                match right.as_ref() {
-                    Self::List(left, right) => {
-                        Self::open_list(map, left, right, |map, stmt| {
-                            args.push_back(stmt.eval(map)?);
-                            Ok(())
-                        })?;
-                    }
-                    Self::Empty => {}
-                    _ => {
-                        args.push_back(right.eval(map)?);
-                    }
-                }
-                left.call(map, args).ok_or_else(|| {
+                let right = right.eval(map)?;
+                left.call(map, right).ok_or_else(|| {
                     Error::new(format!("Cannot call value {:?}", left), map.line())
                 })?
             }
@@ -184,20 +269,41 @@ impl Eval for Stmt {
             Self::Token(token, _) => token.get(map),
             Self::Dot(left, right) => {
                 let left = left.eval(map)?;
-                left.as_res()
-                    .ok_or_else(|| {
-                        Error::new(
-                            format!("Cannot get value from dot left {:?}", left),
-                            map.line(),
-                        )
-                    })?
+                let res = left.as_res().ok_or_else(|| {
+                    Error::new(
+                        format!("Cannot get value from dot left {:?}", left),
+                        map.line(),
+                    )
+                })?;
+                match res
                     .visit_mut(|map: &mut Map| right.get(map))
                     .ok_or_else(|| {
                         Error::new(
                             format!("Cannot get value from dot left {:?}", left),
                             map.line(),
                         )
-                    })?
+                    })? {
+                    Ok(value) => Ok(value),
+                    Err(err) => {
+                        res.visit_mut(|map: &mut Map| {
+                            map.get("meta")
+                                .ok_or_else(|| err)?
+                                .as_res()
+                                .ok_or_else(|| {
+                                    Error::new("\"meta\" is found, but is not a map", map.line())
+                                })?
+                                .visit_mut(|map: &mut Map| right.get(map))
+                                .ok_or_else(|| {
+                                    Error::new(
+                                        format!("Cannot get value from dot left(although \"meta\" map found) {:?}", left),
+                                        map.line(),
+                                    )
+                                })?
+                        })
+                        .unwrap()
+                        // Here we are sure that res is a map
+                    }
+                }
             }
             _ => {
                 let value = self.eval(map)?;

@@ -1,4 +1,5 @@
 use super::*;
+use rt::Eval;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Enclosing {
@@ -31,9 +32,14 @@ pub enum Token {
 
     Dot,
     Colon,
+    Import,
+    Include,
+    Map,
     Fn,
-    Pc,
     Neg,
+    Move,
+    Acq,
+    Return,
     Call,
     List,
     Asn,
@@ -56,10 +62,16 @@ pub enum Stmt {
 
     Dot(Box<Stmt>, Box<Stmt>),
     Colon(Box<Stmt>, Box<Stmt>),
-    Fn(Box<Stmt>, Rc<Stmt>, bool),
+    Import(Box<Stmt>),
+    Include(Box<Stmt>),
+    Map(Box<Stmt>, Box<Stmt>),
+    Fn(Rc<Stmt>),
     Neg(Box<Stmt>),
     Call(Box<Stmt>, Box<Stmt>),
     List(Box<Stmt>, Box<Stmt>),
+    Move(Box<Stmt>),
+    Acq(Box<Stmt>),
+    Return(Box<Stmt>),
     Asn(Box<Stmt>, Box<Stmt>),
 }
 
@@ -87,10 +99,13 @@ impl Token {
         match self {
             Self::Dot => 1,
             Self::Colon => 2,
-            Self::Fn | Self::Pc => 5,
+            Self::Import | Self::Include => 3,
+            Self::Map => 4,
+            Self::Fn => 5,
             Self::Neg => 10,
-            Self::List => 50,
+            Self::Move | Self::Acq | Self::Return => 15,
             Self::Call => 20,
+            Self::List => 50,
             Self::Asn => 200,
             _ => 0,
         }
@@ -98,27 +113,24 @@ impl Token {
 
     pub fn attr(&self) -> Option<Operator> {
         match self {
-            Self::Dot | Self::Colon | Self::Fn | Self::Pc | Self::Call => Some(Operator::Left),
+            Self::Dot | Self::Colon | Self::Map | Self::Call => Some(Operator::Left),
             Self::List | Self::Asn => Some(Operator::Right),
-            Self::Neg => Some(Operator::Unary),
+            Self::Import
+            | Self::Include
+            | Self::Fn
+            | Self::Neg
+            | Self::Move
+            | Self::Acq
+            | Self::Return => Some(Operator::Unary),
             _ => None,
         }
     }
 
     pub fn to_stmt_fn(&self) -> fn(Box<Stmt>, Box<Stmt>) -> Stmt {
-        fn fn_fn(left: Box<Stmt>, right: Box<Stmt>) -> Stmt {
-            Stmt::Fn(left, Rc::new(*right), false)
-        }
-
-        fn pc_fn(left: Box<Stmt>, right: Box<Stmt>) -> Stmt {
-            Stmt::Fn(left, Rc::new(*right), true)
-        }
-
         match self {
             Self::Dot => Stmt::Dot,
             Self::Colon => Stmt::Colon,
-            Self::Fn => fn_fn,
-            Self::Pc => pc_fn,
+            Self::Map => Stmt::Map,
             Self::Call => Stmt::Call,
             Self::List => Stmt::List,
             Self::Asn => Stmt::Asn,
@@ -127,8 +139,17 @@ impl Token {
     }
 
     pub fn to_stmt_unary_fn(&self) -> fn(Box<Stmt>) -> Stmt {
+        fn fn_fn(stmt: Box<Stmt>) -> Stmt {
+            Stmt::Fn(Rc::new(*stmt))
+        }
         match self {
+            Self::Import => Stmt::Import,
+            Self::Include => Stmt::Include,
+            Self::Fn => fn_fn,
             Self::Neg => Stmt::Neg,
+            Self::Move => Stmt::Move,
+            Self::Acq => Stmt::Acq,
+            Self::Return => Stmt::Return,
             _ => panic!("Cannot convert {:?} to unary stmt function", self),
         }
     }
@@ -179,11 +200,39 @@ impl Stmt {
             _ => None,
         }
     }
+
+    pub fn as_word_or_string(&self, map: &mut Map) -> Result<String> {
+        if let Stmt::Token(token, line) = self {
+            map.set_line(*line);
+            if let Token::Word(name) = token {
+                return Ok(name.to_string());
+            }
+        }
+        self.eval(map)?
+            .as_res()
+            .ok_or_else(|| {
+                Error::new(
+                    format!("Value {:?} cannot be used as name", self),
+                    map.line(),
+                )
+            })?
+            .visit(|s: &String| Ok(s.to_string()))
+            .ok_or_else(|| {
+                Error::new(
+                    format!("Value {:?} cannot be used as name", self),
+                    map.line(),
+                )
+            })?
+    }
 }
 
 impl<'s> Compilable<'s> {
     pub fn new(str: &'s str) -> Self {
         Self(str)
+    }
+
+    pub fn compile(self) -> Result<Stmt> {
+        Ok(self.lex()?.slice().cook()?.0)
     }
 }
 

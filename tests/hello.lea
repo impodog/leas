@@ -1,0 +1,5 @@
+import other
+
+hello = fn {
+    print "Hello, world!"
+}

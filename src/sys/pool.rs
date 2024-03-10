@@ -3,6 +3,9 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct Resource(Rc<dyn Res>);
 
+#[derive(Debug, Clone)]
+pub struct WeakResource(Weak<dyn Res>);
+
 pub trait Res
 where
     Self: fmt::Debug,
@@ -25,6 +28,10 @@ impl Resource {
         T: Res + Sized + 'static,
     {
         Self(Rc::new(RefCell::new(value)))
+    }
+
+    pub fn downgrade(&self) -> WeakResource {
+        WeakResource(Rc::downgrade(&self.0))
     }
 
     pub fn visit<T, F, R>(&self, f: F) -> Option<R>
@@ -53,5 +60,11 @@ impl Resource {
             .as_any()
             .downcast_ref::<RefCell<T>>()?
             .borrow_mut()))
+    }
+}
+
+impl WeakResource {
+    pub fn upgrade(&self) -> Option<Resource> {
+        Some(Resource(self.0.upgrade()?))
     }
 }
