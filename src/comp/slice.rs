@@ -5,12 +5,18 @@ impl Slice {
         Self::Block(VecDeque::new())
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty_or_end(&self) -> bool {
         match self {
             Self::End(_) => true,
-            Self::Token(_) => false,
-            Self::Line(slice) => slice.iter().all(|slice| slice.is_empty()),
-            Self::Block(slice) => slice.iter().all(|slice| slice.is_empty()),
+            _ => self.is_empty(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::End(_) | Self::Token(_) => false,
+            Self::Line(slice) => slice.iter().all(|slice| slice.is_empty_or_end()),
+            Self::Block(slice) => slice.iter().all(|slice| slice.is_empty_or_end()),
         }
     }
 }
@@ -45,13 +51,20 @@ impl Stream {
                             let mut pos = 1;
                             let mut result = VecDeque::new();
                             'outer: while pos < len {
+                                let mut use_end_token = 0;
+
                                 while let Token::End(_) = slice[pos] {
                                     pos += 1;
+                                    use_end_token = 1;
                                     if pos >= len {
                                         break 'outer;
                                     }
                                 }
-                                let (s, p) = Self::slice_with(&mut slice[pos..len], false, true);
+                                let (s, p) = Self::slice_with(
+                                    &mut slice[pos - use_end_token..len],
+                                    false,
+                                    true,
+                                );
                                 if !s.is_empty() {
                                     result.push_back(s);
                                 }

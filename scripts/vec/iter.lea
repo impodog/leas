@@ -1,0 +1,34 @@
+
+shared = map {
+    iter_meta = map {
+        shared = map {
+            import uint
+            get = get
+            set = set
+        }
+
+        next = fn {
+            len = vec.length(arg.target)
+            shared.uint.lt(arg.index, len) then {
+                arg.index = shared.uint.add(arg.index, 1u)
+            } else {
+                stop
+            }
+        }
+
+        get = fn {
+            shared.get(arg.target, shared.uint.sub(arg.index, 1u))
+        }
+
+        set = fn {
+            (arg, value) = arg
+            shared.set(arg.target, shared.uint.sub(arg.index, 1u), value)
+        }
+    }
+}
+
+iter = fn map {
+    index = 0u
+    target = ext (move arg)
+    meta = acq shared.iter_meta
+}

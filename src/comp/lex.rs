@@ -198,11 +198,15 @@ impl<'s> Compilable<'s> {
                             "stop" => stream.push(Token::Stop),
                             "import" => stream.push(Token::Import),
                             "include" => stream.push(Token::Include),
+                            "ext" => stream.push(Token::Extern),
                             "map" => stream.push(Token::Map),
                             "fn" => stream.push(Token::Fn),
                             "move" => stream.push(Token::Move),
                             "acq" => stream.push(Token::Acq),
                             "return" => stream.push(Token::Return),
+                            "then" => stream.push(Token::Then),
+                            "else" => stream.push(Token::Else),
+                            "repeat" => stream.push(Token::Repeat),
                             _ => {
                                 stream.push(Token::Word(std::mem::take(&mut buffer)));
                             }

@@ -93,11 +93,13 @@ impl Stmt {
                     .map_err(|err| err.with(format!("When compiling module {:?}", path)))?;
 
                 let mut new_map = Map::new_under(map);
+                new_map.link(std::mem::take(map));
                 new_map.env().forward_base(path.clone());
                 let result = stmt
                     .eval(&mut new_map)
                     .map_err(|err| err.with(format!("When evaluating module {:?}", path)))?;
                 new_map.env().backward_base();
+                new_map.unlink_to(map);
 
                 let res_map = Resource::new(new_map);
                 map.env().set_import(path, &res_map);
@@ -147,24 +149,15 @@ impl Stmt {
             .eval(map)
     }
 
-    fn eval_map(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
-        let left = left
-            .eval(map)
-            .map_err(|err| err.with("When mapping outside constants into new map"))?;
+    fn eval_map(map: &mut Map, opd: &Self) -> Result<Value> {
         let mut new_map = Map::new_under(map);
-        new_map.push("arg", left);
-        let use_shared = if let Some(shared) = map.get("shared") {
-            new_map.push("shared", shared.clone().downgrade());
-            true
-        } else {
-            false
-        };
-        let result = right.eval(&mut new_map);
-        if use_shared {
-            new_map.pop("shared");
-        }
-        new_map.pop("arg");
+
+        new_map.link(std::mem::take(map));
+        let result = opd.eval(&mut new_map);
+        new_map.unlink_to(map);
+
         result?;
+
         Ok(Value::Res(Resource::new(new_map)))
     }
 
@@ -207,6 +200,57 @@ impl Stmt {
             .map_err(|err| err.with("When moving"))?;
         Ok(map.rem(&name).unwrap_or_else(|| Value::Stop))
     }
+
+    fn eval_else(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        match left {
+            Self::Then(cond, first) => {
+                let cond = cond
+                    .eval(map)
+                    .map_err(|err| err.with("When evaluating condition"))?;
+                let cond = cond.as_bool().ok_or_else(|| {
+                    Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+                })?;
+                if cond {
+                    first.eval(map)
+                } else {
+                    right.eval(map)
+                }
+            }
+            _ => Err(Error::new(
+                "Else keyword should be used after then keyword",
+                map.line(),
+            )),
+        }
+    }
+
+    fn eval_then(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        let cond = left
+            .eval(map)
+            .map_err(|err| err.with("When evaluating condition"))?;
+        let cond = cond.as_bool().ok_or_else(|| {
+            Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+        })?;
+        if cond {
+            right.eval(map)
+        } else {
+            Ok(Value::Stop)
+        }
+    }
+
+    fn eval_repeat(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        let mut result = Value::Stop;
+        loop {
+            let cond = left.eval(map)?;
+            let cond = cond.as_bool().ok_or_else(|| {
+                Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+            })?;
+            if !cond {
+                break;
+            }
+            result = right.eval(map)?;
+        }
+        Ok(result)
+    }
 }
 
 impl Eval for Stmt {
@@ -235,7 +279,16 @@ impl Eval for Stmt {
             Self::Colon(left, right) => Self::eval_colon(map, left, right),
             Self::Import(opd) => Self::eval_import(map, opd),
             Self::Include(opd) => Self::eval_include(map, opd),
-            Self::Map(left, right) => Self::eval_map(map, left, right),
+            Self::Extern(opd) => {
+                let line = map.line();
+                opd.eval(map.parent_mut().ok_or_else(|| {
+                    Error::new(
+                        "Extern keyword is used(right value), but no parent map is found",
+                        line,
+                    )
+                })?)
+            }
+            Self::Map(opd) => Self::eval_map(map, opd),
             Self::Fn(body) => Self::eval_fn(map, body),
             Self::Neg(_opd) => {
                 todo!()
@@ -257,6 +310,9 @@ impl Eval for Stmt {
                 })?
             }
             Self::List(left, right) => Self::eval_list(map, left, right),
+            Self::Else(left, right) => Self::eval_else(map, left, right),
+            Self::Then(left, right) => Self::eval_then(map, left, right),
+            Self::Repeat(left, right) => Self::eval_repeat(map, left, right),
             Self::Asn(left, right) => {
                 let right = right.eval(map)?;
                 left.set(map, right)
@@ -304,6 +360,15 @@ impl Eval for Stmt {
                         // Here we are sure that res is a map
                     }
                 }
+            }
+            Self::Extern(opd) => {
+                let line = map.line();
+                opd.get(map.parent_mut().ok_or_else(|| {
+                    Error::new(
+                        "Extern keyword is used(right value), but no parent map is found",
+                        line,
+                    )
+                })?)
             }
             _ => {
                 let value = self.eval(map)?;
@@ -354,6 +419,18 @@ impl Eval for Stmt {
                             map.line(),
                         )
                     })?
+            }
+            Self::Extern(opd) => {
+                let line = map.line();
+                opd.set(
+                    map.parent_mut().ok_or_else(|| {
+                        Error::new(
+                            "Extern keyword is used(left value), but no parent map is found",
+                            line,
+                        )
+                    })?,
+                    value,
+                )
             }
             Self::List(left, right) => {
                 value

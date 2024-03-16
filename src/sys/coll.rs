@@ -1,11 +1,11 @@
 use super::*;
 
 pub struct Func {
-    pub f: Box<dyn Fn(&mut Map, Value) -> Result<Value>>,
+    pub f: Box<dyn FnMut(&mut Map, Value) -> Result<Value>>,
 }
 
 impl Func {
-    pub fn new(f: impl Fn(&mut Map, Value) -> Result<Value> + 'static) -> Self {
+    pub fn new(f: impl FnMut(&mut Map, Value) -> Result<Value> + 'static) -> Self {
         Self { f: Box::new(f) }
     }
 }

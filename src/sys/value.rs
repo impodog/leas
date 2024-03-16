@@ -5,7 +5,7 @@ pub type Float = f64;
 pub type Uint = u64;
 pub type Bool = bool;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(Int),
     Float(Float),
@@ -80,5 +80,33 @@ impl Value {
         let result = self.as_res()?.visit_mut_func(|f| Some((f.f)(map, value)));
         map.pop("self");
         result?
+    }
+}
+
+impl Value {
+    pub fn visit_res_or_else<F, T, R, E>(&self, f: F, err: E) -> Result<R>
+    where
+        F: FnOnce(&T) -> R + 'static,
+        T: Res + 'static,
+        R: 'static,
+        E: FnOnce() -> Error + Clone + 'static,
+    {
+        self.as_res()
+            .ok_or_else(err.clone())?
+            .visit(f)
+            .ok_or_else(err)
+    }
+
+    pub fn visit_mut_res_or_else<F, T, R, E>(&self, f: F, err: E) -> Result<R>
+    where
+        F: FnOnce(&mut T) -> R + 'static,
+        T: Res + 'static,
+        R: 'static,
+        E: FnOnce() -> Error + Clone + 'static,
+    {
+        self.as_res()
+            .ok_or_else(err.clone())?
+            .visit_mut(f)
+            .ok_or_else(err)
     }
 }

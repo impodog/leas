@@ -63,8 +63,28 @@ impl Resource {
     }
 }
 
+impl PartialEq for Resource {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 impl WeakResource {
     pub fn upgrade(&self) -> Option<Resource> {
         Some(Resource(self.0.upgrade()?))
+    }
+}
+
+impl PartialEq for WeakResource {
+    fn eq(&self, other: &Self) -> bool {
+        if let Some(this) = self.0.upgrade() {
+            if let Some(other) = other.0.upgrade() {
+                Rc::ptr_eq(&this, &other)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }

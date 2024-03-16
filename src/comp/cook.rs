@@ -43,6 +43,9 @@ impl Slice {
                                 ops.push_back(token);
                             }
                             Operator::Unary => {
+                                while ops.back().map_or(false, |op| op.priority() <= priority) {
+                                    result.push_back(Slice::Token(ops.pop_back().unwrap()));
+                                }
                                 ops.push_back(token);
                             }
                         }

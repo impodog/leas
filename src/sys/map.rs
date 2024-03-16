@@ -7,6 +7,8 @@ pub struct Map {
     line: Rc<Cell<usize>>,
 
     env: Rc<Env>,
+
+    parent: Option<Box<Map>>,
 }
 
 impl Map {
@@ -17,6 +19,8 @@ impl Map {
             line: Rc::new(Cell::new(1)),
 
             env: Rc::new(Env::read()),
+
+            parent: None,
         }
     }
 
@@ -27,11 +31,15 @@ impl Map {
             line: map.line.clone(),
 
             env: map.env.clone(),
+
+            parent: None,
         }
     }
 
     pub fn get(&self, k: &str) -> Option<&Value> {
-        self.data.get(k)
+        self.data
+            .get(k)
+            .or_else(|| self.parent.as_ref().and_then(|p| p.get(k)))
     }
 
     pub fn set(&mut self, k: String, v: Value) -> Option<Value> {
@@ -76,8 +84,25 @@ impl Map {
             .cloned()
     }
 
-    pub fn register(&mut self, name: &str, f: Func) {
-        self.set(name.to_string(), Value::Res(Resource::new_func(f)));
+    pub fn register(
+        &mut self,
+        name: &str,
+        f: impl FnMut(&mut Map, Value) -> Result<Value> + 'static,
+    ) {
+        self.set(
+            name.to_string(),
+            Value::Res(Resource::new_func(Func::new(f))),
+        );
+    }
+
+    pub fn register_init(&mut self, name: &str, mut f: impl FnMut(&mut Map) + 'static) {
+        self.set(
+            format!("_init_{}", name),
+            Value::Res(Resource::new_func(Func::new(move |map, _| {
+                f(map);
+                Ok(Value::Null)
+            }))),
+        );
     }
 
     pub fn set_line(&mut self, line: usize) {
@@ -90,6 +115,26 @@ impl Map {
 
     pub fn env(&self) -> &Env {
         self.env.as_ref()
+    }
+
+    pub fn link(&mut self, parent: Map) {
+        self.parent = Some(Box::new(parent));
+    }
+
+    pub fn unlink(&mut self) -> Option<Map> {
+        self.parent.take().map(|p| *p)
+    }
+
+    pub fn unlink_to(&mut self, map: &mut Map) {
+        let _ = std::mem::replace(map, self.unlink().unwrap());
+    }
+
+    pub fn parent(&self) -> Option<&Map> {
+        self.parent.as_ref().map(|p| p.as_ref())
+    }
+
+    pub fn parent_mut(&mut self) -> Option<&mut Map> {
+        self.parent.as_mut().map(|p| p.as_mut())
     }
 }
 

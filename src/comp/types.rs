@@ -34,6 +34,7 @@ pub enum Token {
     Colon,
     Import,
     Include,
+    Extern,
     Map,
     Fn,
     Neg,
@@ -42,6 +43,9 @@ pub enum Token {
     Return,
     Call,
     List,
+    Then,
+    Else,
+    Repeat,
     Asn,
 }
 
@@ -64,14 +68,18 @@ pub enum Stmt {
     Colon(Box<Stmt>, Box<Stmt>),
     Import(Box<Stmt>),
     Include(Box<Stmt>),
-    Map(Box<Stmt>, Box<Stmt>),
+    Extern(Box<Stmt>),
+    Map(Box<Stmt>),
     Fn(Rc<Stmt>),
     Neg(Box<Stmt>),
-    Call(Box<Stmt>, Box<Stmt>),
-    List(Box<Stmt>, Box<Stmt>),
     Move(Box<Stmt>),
     Acq(Box<Stmt>),
     Return(Box<Stmt>),
+    Call(Box<Stmt>, Box<Stmt>),
+    List(Box<Stmt>, Box<Stmt>),
+    Then(Box<Stmt>, Box<Stmt>),
+    Else(Box<Stmt>, Box<Stmt>),
+    Repeat(Box<Stmt>, Box<Stmt>),
     Asn(Box<Stmt>, Box<Stmt>),
 }
 
@@ -99,13 +107,16 @@ impl Token {
         match self {
             Self::Dot => 1,
             Self::Colon => 2,
-            Self::Import | Self::Include => 3,
+            Self::Import | Self::Include | Self::Extern => 3,
             Self::Map => 4,
             Self::Fn => 5,
             Self::Neg => 10,
             Self::Move | Self::Acq | Self::Return => 15,
             Self::Call => 20,
             Self::List => 50,
+            Self::Then => 100,
+            Self::Else => 101,
+            Self::Repeat => 102,
             Self::Asn => 200,
             _ => 0,
         }
@@ -113,11 +124,15 @@ impl Token {
 
     pub fn attr(&self) -> Option<Operator> {
         match self {
-            Self::Dot | Self::Colon | Self::Map | Self::Call => Some(Operator::Left),
-            Self::List | Self::Asn => Some(Operator::Right),
+            Self::Dot | Self::Colon | Self::Call => Some(Operator::Left),
+            Self::List | Self::Then | Self::Else | Self::Repeat | Self::Asn => {
+                Some(Operator::Right)
+            }
             Self::Import
             | Self::Include
+            | Self::Extern
             | Self::Fn
+            | Self::Map
             | Self::Neg
             | Self::Move
             | Self::Acq
@@ -130,9 +145,12 @@ impl Token {
         match self {
             Self::Dot => Stmt::Dot,
             Self::Colon => Stmt::Colon,
-            Self::Map => Stmt::Map,
+
             Self::Call => Stmt::Call,
             Self::List => Stmt::List,
+            Self::Then => Stmt::Then,
+            Self::Else => Stmt::Else,
+            Self::Repeat => Stmt::Repeat,
             Self::Asn => Stmt::Asn,
             _ => panic!("Cannot convert {:?} to binary stmt function", self),
         }
@@ -145,7 +163,9 @@ impl Token {
         match self {
             Self::Import => Stmt::Import,
             Self::Include => Stmt::Include,
+            Self::Extern => Stmt::Extern,
             Self::Fn => fn_fn,
+            Self::Map => Stmt::Map,
             Self::Neg => Stmt::Neg,
             Self::Move => Stmt::Move,
             Self::Acq => Stmt::Acq,

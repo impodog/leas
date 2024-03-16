@@ -39,6 +39,7 @@ impl Eval for Token {
                 map.set(key.clone(), value.clone());
                 Ok(value)
             }
+            Self::Stop => Ok(Value::Stop),
             _ => Err(Error::new(
                 format!("Cannot set value to token {:?}", self),
                 map.line(),

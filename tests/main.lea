@@ -1,1 +1,33 @@
+import int
+import uint
+import float
+import vec
+import sys
+import bool
 
+v = vec.empty()
+a = 10
+int.lt(0, a) repeat {
+    vec.push_back(v, a)
+    a = int.sub(a, 1)
+}
+show = fn {
+    iter = vec.iter(acq v)
+    {
+        value = iter.next(iter)
+        bool.not(sys.same(value, acq stop))
+    } repeat {
+        print (iter.get(iter))
+    }
+}
+show()
+
+iter = vec.iter(acq v)
+{
+    value = iter.next(iter)
+    bool.not(sys.is_stop(value))
+} repeat {
+    iter.set(iter, int.sub(iter.get(iter), 36))
+}
+
+show()
