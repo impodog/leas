@@ -1,0 +1,24 @@
+shared = map {
+    use print, from
+}
+
+println = fn {
+    shared do {
+        print arg "\n"
+    }
+    self
+}
+
+show = fn {
+    shared do {
+        print (from arg)
+    }
+    self
+}
+
+showln = fn {
+    shared do {
+        print (from arg) "\n"
+    }
+    self
+}

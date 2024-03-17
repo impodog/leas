@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct Resource(Rc<dyn Res>);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WeakResource(Weak<dyn Res>);
 
 pub trait Res
@@ -72,6 +72,16 @@ impl PartialEq for Resource {
 impl WeakResource {
     pub fn upgrade(&self) -> Option<Resource> {
         Some(Resource(self.0.upgrade()?))
+    }
+}
+
+impl fmt::Debug for WeakResource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(res) = self.upgrade() {
+            write!(f, "{:?}", res)
+        } else {
+            write!(f, "WeakResource(Deleted)")
+        }
     }
 }
 

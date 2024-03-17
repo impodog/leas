@@ -4,30 +4,49 @@ import float
 import vec
 import sys
 import bool
+import iter
+import str
 
-v = vec.empty()
-a = 10
-int.lt(0, a) repeat {
-    vec.push_back(v, a)
-    a = int.sub(a, 1)
+swap = fn {
+    (v, i, j) = move arg
+    mid = vec.get(v, i)
+    vec.set(v, i, vec.get(v, j))
+    vec.set(v, j, acq mid)
 }
-show = fn {
-    iter = vec.iter(acq v)
-    {
-        value = iter.next(iter)
-        bool.not(sys.same(value, acq stop))
-    } repeat {
-        print (iter.get(iter))
+
+bubble = fn {
+    (v, cmp) = move arg
+    len = vec.length(v)
+    flag = true
+
+    uint.eq(len, 0u) then stop else {
+    
+        flag repeat {
+            flag = false
+            i = 0u
+            bool.not(uint.eq(i, uint.sub(len, 1u))) repeat {
+                next = uint.add(i, 1u)
+
+                cmp(vec.get(v, i), vec.get(v, next)) then {
+
+                } else {
+                    flag = true
+                    swap(v, i, next)
+                }
+
+                i = next
+            }
+        }
+
     }
 }
-show()
 
-iter = vec.iter(acq v)
-{
-    value = iter.next(iter)
-    bool.not(sys.is_stop(value))
-} repeat {
-    iter.set(iter, int.sub(iter.get(iter), 36))
-}
-
-show()
+v = (3, 6, 2, 0, 4, 5, 100, -3, 34, 65, 26, 77, -10)
+bubble (v, int.lt)
+iter.for(
+    vec.iter_of(v):this.range(1u, 3u):this.range(1u, 2u),
+    fn {
+        str.show (arg:this.get(arg))
+        str.print " "
+    }
+)

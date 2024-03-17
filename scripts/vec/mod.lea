@@ -1,3 +1,5 @@
-ext _init_vec()
+extern _init_vec()
 
-include iter
+import iter
+
+use iter.iter_of

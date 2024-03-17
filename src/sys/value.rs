@@ -79,14 +79,23 @@ impl Value {
         map.push("self", self.clone());
         let result = self.as_res()?.visit_mut_func(|f| Some((f.f)(map, value)));
         map.pop("self");
-        result?
+        result?.map(|result| {
+            result.map_err(|err| {
+                err.with(
+                    self.as_res()
+                        .unwrap()
+                        .visit_func(|func| format!("In {:?}", func.as_ref()))
+                        .unwrap_or_else(|| "When calling anonymous function".to_string()),
+                )
+            })
+        })
     }
 }
 
 impl Value {
     pub fn visit_res_or_else<F, T, R, E>(&self, f: F, err: E) -> Result<R>
     where
-        F: FnOnce(&T) -> R + 'static,
+        F: FnOnce(&T) -> R,
         T: Res + 'static,
         R: 'static,
         E: FnOnce() -> Error + Clone + 'static,
@@ -108,5 +117,20 @@ impl Value {
             .ok_or_else(err.clone())?
             .visit_mut(f)
             .ok_or_else(err)
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(value) => write!(f, "{}", value),
+            Self::Float(value) => write!(f, "{}", value),
+            Self::Uint(value) => write!(f, "{}u", value),
+            Self::Bool(value) => write!(f, "{}", value),
+            Self::Null => write!(f, "null"),
+            Self::Stop => write!(f, "stop"),
+            Self::Res(res) => write!(f, "{:?}", res),
+            Self::Weak(weak) => write!(f, "{:?}", weak),
+        }
     }
 }

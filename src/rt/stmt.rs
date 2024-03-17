@@ -1,64 +1,11 @@
 use super::*;
 
 impl Stmt {
-    fn open_list<F>(map: &mut Map, left: &Self, right: &Self, mut f: F) -> Result<()>
-    where
-        F: FnMut(&mut Map, &Self) -> Result<()>,
-    {
-        match left {
-            Self::Token(Token::Stop, line) => {
-                map.set_line(*line);
-                return Ok(());
-            }
-            _ => {
-                f(map, left)?;
-            }
-        }
-        match right {
-            Self::List(left, right) => Self::open_list(map, left, right, f)?,
-            Self::Token(Token::Stop, line) => {
-                map.set_line(*line);
-            }
-            _ => f(map, right)?,
-        }
-        Ok(())
-    }
-
-    fn open_dot<F>(map: &mut Map, left: &Self, right: &Self, mut f: F) -> Result<()>
-    where
-        F: FnMut(&mut Map, &Self) -> Result<()>,
-    {
-        match left {
-            Self::Token(Token::Stop, line) => {
-                map.set_line(*line);
-                return Ok(());
-            }
-            _ => {
-                f(map, left)?;
-            }
-        }
-        match right {
-            Self::Dot(left, right) => Self::open_dot(map, left, right, f)?,
-            Self::Token(Token::Stop, line) => {
-                map.set_line(*line);
-            }
-            _ => f(map, right)?,
-        }
-        Ok(())
-    }
-
-    fn eval_colon(map: &mut Map, _left: &Self, _right: &Self) -> Result<Value> {
-        Err(Error::new(
-            "Colon operator should not be used here",
-            map.line(),
-        ))
-    }
-
     fn eval_import(map: &mut Map, opd: &Self) -> Result<Value> {
         let mut stack = Vec::new();
         let name = if let Stmt::Dot(left, right) = opd {
             let mut result = String::new();
-            Self::open_dot(map, left, right, |map, stmt| {
+            Self::open_dot(map, left, right, |map, stmt, _is_last| {
                 let str = stmt.as_word_or_string(map)?;
                 result.push_str(&str);
                 result.push('/');
@@ -123,7 +70,7 @@ impl Stmt {
     fn eval_include(map: &mut Map, opd: &Self) -> Result<Value> {
         let name = if let Stmt::Dot(left, right) = opd {
             let mut result = String::new();
-            Self::open_dot(map, left, right, |map, stmt| {
+            Self::open_dot(map, left, right, |map, stmt, _is_last| {
                 result.push_str(&stmt.as_word_or_string(map)?);
                 result.push('/');
                 Ok(())
@@ -162,27 +109,22 @@ impl Stmt {
     }
 
     fn eval_fn(map: &mut Map, body: &Rc<Self>) -> Result<Value> {
-        let body = body.clone();
-        let shared = map.get("shared").map(|value| value.clone().downgrade());
+        Self::to_fn(map, body)
+    }
 
-        let f = move |map: &mut Map, arg: Value| -> Result<Value> {
-            map.push("arg", arg);
-            let use_shared = if let Some(shared) = shared.clone() {
-                map.push("shared", shared);
-                true
-            } else {
-                false
-            };
-
-            let result = body.eval(map);
-
-            if use_shared {
-                map.pop("shared");
-            }
-            map.pop("arg");
-            result
-        };
-        Ok(Value::Res(Resource::new_func(Func::new(f))))
+    fn eval_do(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        let left = left.eval(map)?;
+        left.as_res()
+            .ok_or_else(|| Error::new(format!("Cannot enter non-resource {}", left), map.line()))?
+            .visit_mut(|inner_map: &mut Map| {
+                inner_map.link(std::mem::take(map));
+                inner_map.snapshot();
+                let result = right.eval(inner_map);
+                inner_map.rollback();
+                inner_map.unlink_to(map);
+                result
+            })
+            .ok_or_else(|| Error::new(format!("Cannot enter non-resource {}", left), map.line()))?
     }
 
     fn eval_list(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
@@ -192,6 +134,39 @@ impl Stmt {
             Ok(())
         })?;
         Ok(Value::Res(Resource::new(result)))
+    }
+
+    fn eval_use(map: &mut Map, opd: &Self) -> Result<Value> {
+        opd.open_list_or_single(map, |map, stmt| {
+            let mut name = String::new();
+            stmt.open_dot_or_single(map, |map, stmt, is_last| {
+                if is_last {
+                    name.push_str(&stmt.as_word_or_string(map)?);
+                }
+                Ok(())
+            })
+            .map_err(|err| err.with("When evaluating use statement"))?;
+            let value = stmt
+                .eval(map)
+                .map_err(|err| err.with(format!("When using name {:?}", name)))?;
+            map.set(name, value);
+            Ok(())
+        })?;
+
+        Ok(Value::Null)
+    }
+
+    fn eval_expose(map: &mut Map, opd: &Self) -> Result<Value> {
+        opd.open_list_or_single(map, |map, stmt| {
+            let name = stmt
+                .as_word_or_string(map)
+                .map_err(|err| err.with("When evaluating expose"))?;
+            map.global(name);
+
+            Ok(())
+        })?;
+
+        Ok(Value::Null)
     }
 
     fn eval_move(map: &mut Map, opd: &Self) -> Result<Value> {
@@ -208,7 +183,7 @@ impl Stmt {
                     .eval(map)
                     .map_err(|err| err.with("When evaluating condition"))?;
                 let cond = cond.as_bool().ok_or_else(|| {
-                    Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+                    Error::new(format!("Condition {} is not a boolean", cond), map.line())
                 })?;
                 if cond {
                     first.eval(map)
@@ -228,7 +203,7 @@ impl Stmt {
             .eval(map)
             .map_err(|err| err.with("When evaluating condition"))?;
         let cond = cond.as_bool().ok_or_else(|| {
-            Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+            Error::new(format!("Condition {} is not a boolean", cond), map.line())
         })?;
         if cond {
             right.eval(map)
@@ -242,7 +217,7 @@ impl Stmt {
         loop {
             let cond = left.eval(map)?;
             let cond = cond.as_bool().ok_or_else(|| {
-                Error::new(format!("Condition {:?} is not a boolean", cond), map.line())
+                Error::new(format!("Condition {} is not a boolean", cond), map.line())
             })?;
             if !cond {
                 break;
@@ -250,6 +225,14 @@ impl Stmt {
             result = right.eval(map)?;
         }
         Ok(result)
+    }
+
+    fn eval_colon(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
+        let left = left.eval(map)?;
+        map.push("this", left);
+        let result = right.eval(map);
+        map.pop("this");
+        result
     }
 }
 
@@ -276,7 +259,6 @@ impl Eval for Stmt {
             }
             Self::Empty => Ok(Value::Null),
             Self::Dot(_, _) => self.get(map),
-            Self::Colon(left, right) => Self::eval_colon(map, left, right),
             Self::Import(opd) => Self::eval_import(map, opd),
             Self::Include(opd) => Self::eval_include(map, opd),
             Self::Extern(opd) => {
@@ -305,14 +287,17 @@ impl Eval for Stmt {
             Self::Call(left, right) => {
                 let left = left.eval(map)?;
                 let right = right.eval(map)?;
-                left.call(map, right).ok_or_else(|| {
-                    Error::new(format!("Cannot call value {:?}", left), map.line())
-                })?
+                left.call(map, right)
+                    .ok_or_else(|| Error::new(format!("Cannot call value {}", left), map.line()))?
             }
+            Self::Do(left, right) => Self::eval_do(map, left, right),
             Self::List(left, right) => Self::eval_list(map, left, right),
+            Self::Use(opd) => Self::eval_use(map, opd),
+            Self::Expose(opd) => Self::eval_expose(map, opd),
             Self::Else(left, right) => Self::eval_else(map, left, right),
             Self::Then(left, right) => Self::eval_then(map, left, right),
             Self::Repeat(left, right) => Self::eval_repeat(map, left, right),
+            Self::Colon(left, right) => Self::eval_colon(map, left, right),
             Self::Asn(left, right) => {
                 let right = right.eval(map)?;
                 left.set(map, right)
@@ -348,7 +333,10 @@ impl Eval for Stmt {
                                 .ok_or_else(|| {
                                     Error::new("\"meta\" is found, but is not a map", map.line())
                                 })?
-                                .visit_mut(|map: &mut Map| right.get(map))
+                                .visit_mut(|map: &mut Map| {
+                                    let result = right.get(map);
+                                    result
+                                })
                                 .ok_or_else(|| {
                                     Error::new(
                                         format!("Cannot get value from dot left(although \"meta\" map found) {:?}", left),
@@ -379,14 +367,14 @@ impl Eval for Stmt {
                             .as_res()
                             .ok_or_else(|| {
                                 Error::new(
-                                    format!("Cannot get value from name {:?}", value),
+                                    format!("Cannot get value from name {}", value),
                                     map.line(),
                                 )
                             })?
                             .visit(|s: &String| map.get(s).cloned())
                             .ok_or_else(|| {
                                 Error::new(
-                                    format!("Cannot get value from name {:?}", value),
+                                    format!("Cannot get value from name {}", value),
                                     map.line(),
                                 )
                             })?;
@@ -407,17 +395,11 @@ impl Eval for Stmt {
                 let left = left.eval(map)?;
                 left.as_res()
                     .ok_or_else(|| {
-                        Error::new(
-                            format!("Cannot set value to dot left {:?}", left),
-                            map.line(),
-                        )
+                        Error::new(format!("Cannot set value to dot left {}", left), map.line())
                     })?
                     .visit_mut(|map: &mut Map| right.set(map, value))
                     .ok_or_else(|| {
-                        Error::new(
-                            format!("Cannot set value to dot left {:?}", left),
-                            map.line(),
-                        )
+                        Error::new(format!("Cannot set value to dot left {}", left), map.line())
                     })?
             }
             Self::Extern(opd) => {
@@ -436,7 +418,7 @@ impl Eval for Stmt {
                 value
                     .as_res()
                     .ok_or_else(|| {
-                        Error::new(format!("Cannot unwrap non-list {:?}", value), map.line())
+                        Error::new(format!("Cannot unwrap non-list {}", value), map.line())
                     })?
                     .visit(|list: &VecDeque<Value>| {
                         let mut iter = list.iter();
@@ -451,7 +433,7 @@ impl Eval for Stmt {
                         })
                     })
                     .ok_or_else(|| {
-                        Error::new(format!("Cannot unwrap non-list {:?}", value), map.line())
+                        Error::new(format!("Cannot unwrap non-list {}", value), map.line())
                     })??;
                 Ok(value)
             }
@@ -460,14 +442,14 @@ impl Eval for Stmt {
                 left.as_res()
                     .ok_or_else(|| {
                         Error::new(
-                            format!("Cannot set value to name {:?}", left.clone()),
+                            format!("Cannot set value to name {}", left.clone()),
                             map.line(),
                         )
                     })?
                     .visit(|s: &String| map.set(s.to_string(), value.clone()))
                     .ok_or_else(|| {
                         Error::new(
-                            format!("Cannot set value to name {:?}", left.clone()),
+                            format!("Cannot set value to name {}", left.clone()),
                             map.line(),
                         )
                     })?;

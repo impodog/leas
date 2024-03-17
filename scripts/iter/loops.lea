@@ -1,0 +1,17 @@
+shared = map {
+    import bool
+    import sys
+    import uint
+}
+
+for = fn {
+    (iter, f) = move arg
+    shared do {
+        {
+            value = iter:this.next()
+            bool.not(sys.is_stop(value))
+        } repeat {
+            f(iter)
+        }
+    }
+}

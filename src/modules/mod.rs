@@ -4,6 +4,8 @@ pub mod bool;
 pub mod float;
 #[cfg(feature = "int")]
 pub mod int;
+#[cfg(feature = "str")]
+pub mod str;
 #[cfg(feature = "sys")]
 pub mod sys;
 #[cfg(feature = "uint")]

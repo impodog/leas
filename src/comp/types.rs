@@ -1,5 +1,4 @@
 use super::*;
-use rt::Eval;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Enclosing {
@@ -31,7 +30,7 @@ pub enum Token {
     Stop,
 
     Dot,
-    Colon,
+    Use,
     Import,
     Include,
     Extern,
@@ -42,10 +41,13 @@ pub enum Token {
     Acq,
     Return,
     Call,
+    Do,
     List,
+    Expose,
     Then,
     Else,
     Repeat,
+    Colon,
     Asn,
 }
 
@@ -65,7 +67,6 @@ pub enum Stmt {
     Empty,
 
     Dot(Box<Stmt>, Box<Stmt>),
-    Colon(Box<Stmt>, Box<Stmt>),
     Import(Box<Stmt>),
     Include(Box<Stmt>),
     Extern(Box<Stmt>),
@@ -76,10 +77,14 @@ pub enum Stmt {
     Acq(Box<Stmt>),
     Return(Box<Stmt>),
     Call(Box<Stmt>, Box<Stmt>),
+    Do(Box<Stmt>, Box<Stmt>),
     List(Box<Stmt>, Box<Stmt>),
+    Use(Box<Stmt>),
+    Expose(Box<Stmt>),
     Then(Box<Stmt>, Box<Stmt>),
     Else(Box<Stmt>, Box<Stmt>),
     Repeat(Box<Stmt>, Box<Stmt>),
+    Colon(Box<Stmt>, Box<Stmt>),
     Asn(Box<Stmt>, Box<Stmt>),
 }
 
@@ -106,17 +111,19 @@ impl Token {
     pub fn priority(&self) -> u8 {
         match self {
             Self::Dot => 1,
-            Self::Colon => 2,
             Self::Import | Self::Include | Self::Extern => 3,
             Self::Map => 4,
             Self::Fn => 5,
             Self::Neg => 10,
             Self::Move | Self::Acq | Self::Return => 15,
             Self::Call => 20,
+            Self::Do => 30,
             Self::List => 50,
+            Self::Use | Self::Expose => 60,
             Self::Then => 100,
             Self::Else => 101,
             Self::Repeat => 102,
+            Self::Colon => 103,
             Self::Asn => 200,
             _ => 0,
         }
@@ -124,10 +131,11 @@ impl Token {
 
     pub fn attr(&self) -> Option<Operator> {
         match self {
-            Self::Dot | Self::Colon | Self::Call => Some(Operator::Left),
-            Self::List | Self::Then | Self::Else | Self::Repeat | Self::Asn => {
+            Self::Dot | Self::Call | Self::Colon => Some(Operator::Left),
+            Self::Do | Self::List | Self::Then | Self::Else | Self::Repeat | Self::Asn => {
                 Some(Operator::Right)
             }
+
             Self::Import
             | Self::Include
             | Self::Extern
@@ -136,7 +144,9 @@ impl Token {
             | Self::Neg
             | Self::Move
             | Self::Acq
-            | Self::Return => Some(Operator::Unary),
+            | Self::Return
+            | Self::Use
+            | Self::Expose => Some(Operator::Unary),
             _ => None,
         }
     }
@@ -144,13 +154,14 @@ impl Token {
     pub fn to_stmt_fn(&self) -> fn(Box<Stmt>, Box<Stmt>) -> Stmt {
         match self {
             Self::Dot => Stmt::Dot,
-            Self::Colon => Stmt::Colon,
 
             Self::Call => Stmt::Call,
+            Self::Do => Stmt::Do,
             Self::List => Stmt::List,
             Self::Then => Stmt::Then,
             Self::Else => Stmt::Else,
             Self::Repeat => Stmt::Repeat,
+            Self::Colon => Stmt::Colon,
             Self::Asn => Stmt::Asn,
             _ => panic!("Cannot convert {:?} to binary stmt function", self),
         }
@@ -170,6 +181,8 @@ impl Token {
             Self::Move => Stmt::Move,
             Self::Acq => Stmt::Acq,
             Self::Return => Stmt::Return,
+            Self::Use => Stmt::Use,
+            Self::Expose => Stmt::Expose,
             _ => panic!("Cannot convert {:?} to unary stmt function", self),
         }
     }
@@ -204,45 +217,6 @@ impl Enclosing {
             Enclosing::Bracket => ']',
             Enclosing::Brace => '}',
         }
-    }
-}
-
-impl Stmt {
-    pub fn as_word(&self, map: &mut Map) -> Option<String> {
-        match self {
-            Self::Token(token, line) => {
-                map.set_line(*line);
-                match token {
-                    Token::Word(name) => Some(name.to_string()),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    pub fn as_word_or_string(&self, map: &mut Map) -> Result<String> {
-        if let Stmt::Token(token, line) = self {
-            map.set_line(*line);
-            if let Token::Word(name) = token {
-                return Ok(name.to_string());
-            }
-        }
-        self.eval(map)?
-            .as_res()
-            .ok_or_else(|| {
-                Error::new(
-                    format!("Value {:?} cannot be used as name", self),
-                    map.line(),
-                )
-            })?
-            .visit(|s: &String| Ok(s.to_string()))
-            .ok_or_else(|| {
-                Error::new(
-                    format!("Value {:?} cannot be used as name", self),
-                    map.line(),
-                )
-            })?
     }
 }
 

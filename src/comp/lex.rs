@@ -5,8 +5,10 @@ enum Status {
     Normal,
     Int,
     Float,
-    Str(bool),
+    // (is_escape, is_raw_string)
+    Str(bool, bool),
     Word,
+    Comment,
 }
 
 impl<'s> Compilable<'s> {
@@ -59,12 +61,16 @@ impl<'s> Compilable<'s> {
                         true
                     }
                     '\"' => {
-                        status = Status::Str(false);
+                        status = Status::Str(false, false);
                         true
                     }
                     'A'..='Z' | 'a'..='z' | '_' => {
                         status = Status::Word;
                         buffer.push(c);
+                        true
+                    }
+                    '#' => {
+                        status = Status::Comment;
                         true
                     }
                     '.' => {
@@ -158,25 +164,36 @@ impl<'s> Compilable<'s> {
                         false
                     }
                 },
-                Status::Str(is_escape) => {
+                Status::Str(is_escape, is_raw_string) => {
+                    if c == '\n' {
+                        line += 1;
+                    }
                     if is_escape {
-                        let c = match c {
-                            'n' => '\n',
-                            'r' => '\r',
-                            't' => '\t',
-                            _ => c,
+                        let c = if is_raw_string {
+                            buffer.push('\\');
+                            c
+                        } else {
+                            match c {
+                                'n' => '\n',
+                                'r' => '\r',
+                                't' => '\t',
+                                _ => c,
+                            }
                         };
                         buffer.push(c);
-                        status = Status::Str(false);
+                        status = Status::Str(false, is_raw_string);
                         true
                     } else {
                         match c {
                             '\\' => {
-                                status = Status::Str(true);
+                                status = Status::Str(true, is_raw_string);
                             }
-                            '\"' => {
+                            '\"' if !is_raw_string => {
                                 stream.push(Token::Str(std::mem::take(&mut buffer)));
                                 status = Status::Normal;
+                            }
+                            '%' => {
+                                status = Status::Str(false, !is_raw_string);
                             }
                             _ => {
                                 buffer.push(c);
@@ -196,14 +213,18 @@ impl<'s> Compilable<'s> {
                             "false" => stream.push(Token::Bool(false)),
                             "null" => stream.push(Token::Null),
                             "stop" => stream.push(Token::Stop),
+
                             "import" => stream.push(Token::Import),
                             "include" => stream.push(Token::Include),
-                            "ext" => stream.push(Token::Extern),
+                            "extern" => stream.push(Token::Extern),
                             "map" => stream.push(Token::Map),
                             "fn" => stream.push(Token::Fn),
                             "move" => stream.push(Token::Move),
                             "acq" => stream.push(Token::Acq),
                             "return" => stream.push(Token::Return),
+                            "do" => stream.push(Token::Do),
+                            "use" => stream.push(Token::Use),
+                            "expose" => stream.push(Token::Expose),
                             "then" => stream.push(Token::Then),
                             "else" => stream.push(Token::Else),
                             "repeat" => stream.push(Token::Repeat),
@@ -215,6 +236,14 @@ impl<'s> Compilable<'s> {
                         status = Status::Normal;
                         false
                     }
+                },
+                Status::Comment => match c {
+                    '\n' => {
+                        line += 1;
+                        status = Status::Normal;
+                        true
+                    }
+                    _ => true,
                 },
             };
 

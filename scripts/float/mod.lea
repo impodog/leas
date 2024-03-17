@@ -1,1 +1,1 @@
-ext _init_float()
+extern _init_float()

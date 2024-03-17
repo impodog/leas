@@ -2,17 +2,31 @@ use super::*;
 
 pub struct Func {
     pub f: Box<dyn FnMut(&mut Map, Value) -> Result<Value>>,
+    pub name: Option<String>,
 }
 
 impl Func {
-    pub fn new(f: impl FnMut(&mut Map, Value) -> Result<Value> + 'static) -> Self {
-        Self { f: Box::new(f) }
+    pub fn new(f: impl FnMut(&mut Map, Value) -> Result<Value> + 'static, name: String) -> Self {
+        Self {
+            f: Box::new(f),
+            name: Some(name),
+        }
+    }
+
+    pub fn new_unnamed(f: impl FnMut(&mut Map, Value) -> Result<Value> + 'static) -> Self {
+        Self {
+            f: Box::new(f),
+            name: None,
+        }
     }
 }
 
 impl fmt::Debug for Func {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<Dynamic Function>")
+        match self.name {
+            Some(ref name) => write!(f, "<fn {}>", name),
+            None => write!(f, "<anonymous function>"),
+        }
     }
 }
 

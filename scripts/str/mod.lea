@@ -1,0 +1,7 @@
+extern _init_str()
+
+import iter
+import printing
+
+use iter.iter_of
+use printing.println, printing.show, printing.showln

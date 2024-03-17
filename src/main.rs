@@ -21,17 +21,14 @@ fn main() {
     let cooked = open(sliced.cook());
     //println!("Output cooked: {:?}", cooked.0);
     let mut map = sys::Map::new();
-    map.register("print", |map, v| {
-        println!("{:?}", v.upgrade().unwrap());
-        Ok(map.req("self").unwrap().clone())
-    });
+
     leas::modules::bool::init(&mut map);
     leas::modules::float::init(&mut map);
     leas::modules::int::init(&mut map);
+    leas::modules::str::init(&mut map);
     leas::modules::sys::init(&mut map);
     leas::modules::uint::init(&mut map);
     leas::modules::vec::init(&mut map);
 
-    let result = open(cooked.0.eval(&mut map));
-    println!("Output result: {:?}", result);
+    let _result = open(cooked.0.eval(&mut map));
 }

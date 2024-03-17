@@ -1,0 +1,52 @@
+shared = map {
+    use length
+
+    iter_meta = map {
+        shared = map {
+            import uint
+            use get, set, length
+        }
+
+        next = fn {
+            shared do {
+                uint.lt(this.index, uint.sub(this.end, 1u)) then {
+                    this.index = uint.add(this.index, 1u)
+                } else {
+                    stop
+                }
+            }
+        }
+
+        get = fn {
+            shared do {
+                get(this.target, uint.sub(this.index, 1u))
+            }
+        }
+
+        set = fn {
+            shared do {
+                set(this.target, uint.sub(this.index, 1u), arg)
+            }
+        }
+
+        range = fn {
+            (begin, end) = arg
+            shared do {
+                this.begin = uint.add(this.begin, begin)
+                this.end = uint.add(this.begin, end)
+                this.index = this.begin
+            }
+            acq this
+        }
+    }
+}
+
+iter_of = fn map {
+    index = 0u
+    begin = 0u
+    end = shared do {
+        length(arg)
+    }
+    target = extern (move arg)
+    meta = acq shared.iter_meta
+}

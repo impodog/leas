@@ -1,1 +1,5 @@
-ext _init_sys()
+extern _init_sys()
+
+import func
+
+use func.curry

@@ -1,1 +1,1 @@
-ext _init_bool()
+extern _init_bool()

@@ -37,6 +37,13 @@ impl Eval for Token {
         match self {
             Self::Word(key) | Self::Str(key) => {
                 map.set(key.clone(), value.clone());
+                value.as_res().and_then(|res| {
+                    res.visit_mut_func(|func| {
+                        if func.name.is_none() {
+                            func.name = Some(key.clone())
+                        }
+                    })
+                });
                 Ok(value)
             }
             Self::Stop => Ok(Value::Stop),

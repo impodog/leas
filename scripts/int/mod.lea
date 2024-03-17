@@ -1,1 +1,1 @@
-ext _init_int()
+extern _init_int()

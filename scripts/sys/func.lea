@@ -1,0 +1,28 @@
+shared = map {
+    import uint
+    import vec
+}
+
+curry = fn {
+    shared do {
+        (f, len) = move arg
+        shared = map {
+            use f, len
+            args = vec.empty()
+        }
+
+        fn {
+            shared do {
+                use arg
+
+                vec.push_back(args, arg)
+                
+                uint.eq(vec.length(args), len) then {
+                    f args
+                } else {
+                    self
+                }
+            }
+        }
+    }
+}
