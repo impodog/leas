@@ -2,14 +2,14 @@ use super::*;
 
 impl Stmt {
     fn eval_import(map: &mut Map, opd: &Self) -> Result<Value> {
-        let mut stack = Vec::new();
+        let mut stack = VecDeque::new();
         let name = if let Stmt::Dot(left, right) = opd {
             let mut result = String::new();
             Self::open_dot(map, left, right, |map, stmt, _is_last| {
                 let str = stmt.as_word_or_string(map)?;
                 result.push_str(&str);
                 result.push('/');
-                stack.push(str);
+                stack.push_back(str);
                 Ok(())
             })
             .map_err(|err| err.with("When importing"))?;
@@ -19,7 +19,7 @@ impl Stmt {
             let name = opd
                 .as_word_or_string(map)
                 .map_err(|err| err.with("When importing"))?;
-            stack.push(name.clone());
+            stack.push_back(name.clone());
             name
         };
 
@@ -40,7 +40,9 @@ impl Stmt {
                     .map_err(|err| err.with(format!("When compiling module {:?}", path)))?;
 
                 let mut new_map = Map::new_under(map);
-                new_map.link(std::mem::take(map));
+                unsafe {
+                    new_map.link_to(map);
+                }
                 new_map.env().forward_base(path.clone());
                 let result = stmt
                     .eval(&mut new_map)
@@ -56,13 +58,13 @@ impl Stmt {
         };
 
         while stack.len() > 1 {
-            let name = stack.pop().unwrap();
+            let name = stack.pop_back().unwrap();
             let new_map = Resource::new(Map::new_under(map));
             new_map.visit_mut(|map: &mut Map| map.set(name, Value::Res(res_map.clone())));
             res_map = new_map;
         }
 
-        map.set(stack.pop().unwrap(), Value::Res(res_map.clone()));
+        map.set(stack.pop_back().unwrap(), Value::Res(res_map.clone()));
 
         Ok(result.unwrap_or_else(|| Value::Null))
     }
@@ -99,7 +101,9 @@ impl Stmt {
     fn eval_map(map: &mut Map, opd: &Self) -> Result<Value> {
         let mut new_map = Map::new_under(map);
 
-        new_map.link(std::mem::take(map));
+        unsafe {
+            new_map.link_to(map);
+        }
         let result = opd.eval(&mut new_map);
         new_map.unlink_to(map);
 
@@ -117,7 +121,9 @@ impl Stmt {
         left.as_res()
             .ok_or_else(|| Error::new(format!("Cannot enter non-resource {}", left), map.line()))?
             .visit_mut(|inner_map: &mut Map| {
-                inner_map.link(std::mem::take(map));
+                unsafe {
+                    inner_map.link_to(map);
+                }
                 inner_map.snapshot();
                 let result = right.eval(inner_map);
                 inner_map.rollback();
@@ -173,7 +179,7 @@ impl Stmt {
         let name = opd
             .as_word_or_string(map)
             .map_err(|err| err.with("When moving"))?;
-        Ok(map.rem(&name).unwrap_or_else(|| Value::Stop))
+        Ok(map.rem(Cow::Owned(name)).unwrap_or_else(|| Value::Stop))
     }
 
     fn eval_else(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
@@ -229,9 +235,9 @@ impl Stmt {
 
     fn eval_colon(map: &mut Map, left: &Self, right: &Self) -> Result<Value> {
         let left = left.eval(map)?;
-        map.push("this", left);
+        map.push_name("this", left);
         let result = right.eval(map);
-        map.pop("this");
+        map.pop_name("this");
         result
     }
 }

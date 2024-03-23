@@ -6,47 +6,25 @@ import sys
 import bool
 import iter
 import str
+import toml
 
-swap = fn {
-    (v, i, j) = move arg
-    mid = vec.get(v, i)
-    vec.set(v, i, vec.get(v, j))
-    vec.set(v, j, acq mid)
-}
-
-bubble = fn {
-    (v, cmp) = move arg
-    len = vec.length(v)
-    flag = true
-
-    uint.eq(len, 0u) then stop else {
-    
-        flag repeat {
-            flag = false
-            i = 0u
-            bool.not(uint.eq(i, uint.sub(len, 1u))) repeat {
-                next = uint.add(i, 1u)
-
-                cmp(vec.get(v, i), vec.get(v, next)) then {
-
-                } else {
-                    flag = true
-                    swap(v, i, next)
+s = toml.se(
+    map {
+        a = 1
+        b = 2
+        c = map {
+            d = 3.14
+            e = "Dogs are so cute!"
+            f = map {
+                g = map {
+                    h = map {
+                        dogs = "Cute!"
+                    }
                 }
-
-                i = next
             }
         }
-
-    }
-}
-
-v = (3, 6, 2, 0, 4, 5, 100, -3, 34, 65, 26, 77, -10)
-bubble (v, int.lt)
-iter.for(
-    vec.iter_of(v):this.range(1u, 3u):this.range(1u, 2u),
-    fn {
-        str.show (arg:this.get(arg))
-        str.print " "
     }
 )
+str.println(s)
+m = toml.de(s)
+str.showln m.c.e

@@ -1,0 +1,20 @@
+shared = map {
+    import str
+
+    use unwrap
+    use from
+    use to_str
+    use from_str
+}
+
+se = fn {
+    shared do {
+        to_str(from(arg))
+    }
+}
+
+de = fn {
+    shared do {
+        unwrap(from_str(arg))
+    }
+}

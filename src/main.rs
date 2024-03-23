@@ -27,6 +27,7 @@ fn main() {
     leas::modules::int::init(&mut map);
     leas::modules::str::init(&mut map);
     leas::modules::sys::init(&mut map);
+    leas::modules::toml::init(&mut map);
     leas::modules::uint::init(&mut map);
     leas::modules::vec::init(&mut map);
 

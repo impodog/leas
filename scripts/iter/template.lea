@@ -9,7 +9,7 @@ shared = map {
 
         next = fn {
             shared do {
-                uint.lt(this.index, uint.sub(this.end, 1u)) then {
+                uint.lt(this.index, this.end) then {
                     this.index = uint.add(this.index, 1u)
                 } else {
                     stop

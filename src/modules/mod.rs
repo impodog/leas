@@ -8,6 +8,8 @@ pub mod int;
 pub mod str;
 #[cfg(feature = "sys")]
 pub mod sys;
+#[cfg(feature = "toml_c")]
+pub mod toml;
 #[cfg(feature = "uint")]
 pub mod uint;
 #[cfg(feature = "vec")]

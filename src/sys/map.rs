@@ -4,7 +4,7 @@ use super::*;
 pub struct Map {
     data: HashMap<String, Value>,
     pushed: HashMap<String, Vec<Value>>,
-    snapshot: Vec<(Vec<String>, HashSet<String>)>,
+    snapshot: Vec<(HashSet<String>, HashSet<String>)>,
     line: Rc<Cell<usize>>,
 
     env: Rc<Env>,
@@ -50,36 +50,54 @@ impl Map {
     }
 
     pub fn set(&mut self, k: String, v: Value) {
-        let arg = if let Some((_, globals)) = self.snapshot.last_mut() {
+        if let Some((changes, globals)) = self.snapshot.last_mut() {
             if globals.contains(&k) {
                 self.forced_set(k, v);
-                None
             } else {
-                Some((k, v))
+                if changes.insert(k.clone()) {
+                    self.push(k, v);
+                } else {
+                    self.forced_set(k, v);
+                }
             }
         } else {
             self.forced_set(k, v);
-            None
         };
-
-        if let Some((k, v)) = arg {
-            self.push(&k, v);
-            self.snapshot.last_mut().unwrap().0.push(k);
-        }
     }
 
-    pub fn rem(&mut self, k: &str) -> Option<Value> {
+    pub fn forced_rem(&mut self, k: &str) -> Option<Value> {
         self.data.remove(k)
     }
 
+    pub fn rem(&mut self, k: Cow<str>) -> Option<Value> {
+        if let Some((changes, globals)) = self.snapshot.last_mut() {
+            if globals.contains(k.as_ref()) {
+                self.forced_rem(k.as_ref())
+            } else {
+                if changes.insert(k.to_string()) {
+                    if let Some(value) = self.get(k.as_ref()).cloned() {
+                        self.push(k.into(), value.clone());
+                        Some(value)
+                    } else {
+                        None
+                    }
+                } else {
+                    self.forced_rem(k.as_ref())
+                }
+            }
+        } else {
+            self.forced_rem(k.as_ref())
+        }
+    }
+
     pub fn snapshot(&mut self) {
-        self.snapshot.push((Vec::new(), HashSet::new()));
+        self.snapshot.push((HashSet::new(), HashSet::new()));
     }
 
     pub fn rollback(&mut self) {
         if let Some((snapshot, _)) = self.snapshot.pop() {
-            for k in snapshot.into_iter().rev() {
-                self.pop(&k);
+            for k in snapshot.into_iter() {
+                self.pop(Cow::Owned(k));
             }
         }
     }
@@ -90,10 +108,10 @@ impl Map {
         }
     }
 
-    pub fn push(&mut self, k: &str, v: Value) {
-        let value = self.rem(k);
+    pub fn push(&mut self, k: String, v: Value) {
+        let value = self.forced_rem(&k);
         if let Some(value) = value {
-            match self.pushed.get_mut(k) {
+            match self.pushed.get_mut(&k) {
                 Some(pushed) => {
                     pushed.push(value);
                 }
@@ -102,20 +120,28 @@ impl Map {
                 }
             }
         }
-        self.forced_set(k.to_string(), v);
+        self.forced_set(k, v);
     }
 
-    pub fn pop(&mut self, k: &str) {
-        match self.pushed.get_mut(k) {
+    pub fn push_name(&mut self, k: impl ToString, v: Value) {
+        self.push(k.to_string(), v);
+    }
+
+    pub fn pop(&mut self, k: Cow<str>) {
+        match self.pushed.get_mut(k.as_ref()) {
             Some(pushed) => {
                 if let Some(value) = pushed.pop() {
-                    self.set(k.to_string(), value);
+                    self.set(k.into(), value);
                 }
             }
             None => {
                 self.rem(k);
             }
         }
+    }
+
+    pub fn pop_name(&mut self, k: &str) {
+        self.pop(Cow::Borrowed(k));
     }
 
     pub fn req(&self, k: &str) -> Result<Value> {
@@ -168,12 +194,25 @@ impl Map {
         self.parent = Some(Box::new(parent));
     }
 
+    /// Link to a mutable reference of a map, leaving the original map in an invalid state.
+    /// Remember to call `unlink_to` to get the original map back.
+    pub unsafe fn link_to(&mut self, map: &mut Map) {
+        self.link(std::mem::replace(
+            map,
+            #[allow(invalid_value)]
+            std::mem::MaybeUninit::uninit().assume_init(),
+        ))
+    }
+
     pub fn unlink(&mut self) -> Option<Map> {
         self.parent.take().map(|p| *p)
     }
 
+    /// Unlink the current map with its parent, moving the parent map to the given mutable reference.
+    /// This function forgets the given map, and is *ONLY* used with `link_to`
     pub fn unlink_to(&mut self, map: &mut Map) {
-        let _ = std::mem::replace(map, self.unlink().unwrap());
+        let unused_map = std::mem::replace(map, self.unlink().unwrap());
+        std::mem::forget(unused_map);
     }
 
     pub fn parent(&self) -> Option<&Map> {
@@ -182,6 +221,10 @@ impl Map {
 
     pub fn parent_mut(&mut self) -> Option<&mut Map> {
         self.parent.as_mut().map(|p| p.as_mut())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
+        self.data.iter()
     }
 }
 

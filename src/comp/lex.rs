@@ -25,7 +25,7 @@ impl<'s> Compilable<'s> {
         while let Some(&c) = chars.peek() {
             let used = match status {
                 Status::Normal => match c {
-                    ' ' | '\t' => true,
+                    ' ' | '\t' | '\r' => true,
                     '\n' => {
                         line += 1;
                         stream.push(Token::End(line));

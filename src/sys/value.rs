@@ -76,9 +76,9 @@ impl Value {
     }
 
     pub fn call(&self, map: &mut Map, value: Value) -> Option<Result<Value>> {
-        map.push("self", self.clone());
+        map.push_name("self", self.clone());
         let result = self.as_res()?.visit_mut_func(|f| Some((f.f)(map, value)));
-        map.pop("self");
+        map.pop_name("self");
         result?.map(|result| {
             result.map_err(|err| {
                 err.with(

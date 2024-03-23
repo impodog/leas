@@ -99,13 +99,13 @@ impl Stmt {
 
     pub fn to_fn(map: &mut Map, body: &Rc<Self>) -> Result<Value> {
         let body = body.clone();
-        // This downgrade is unnecessary
+        // Downgrading here is unnecessary
         let shared = map.get("shared").cloned();
 
         let f = move |map: &mut Map, arg: Value| -> Result<Value> {
-            map.push("arg", arg);
+            map.push_name("arg", arg);
             let use_shared = if let Some(shared) = shared.clone() {
-                map.push("shared", shared);
+                map.push_name("shared", shared);
                 true
             } else {
                 false
@@ -116,9 +116,9 @@ impl Stmt {
             map.rollback();
 
             if use_shared {
-                map.pop("shared");
+                map.pop_name("shared");
             }
-            map.pop("arg");
+            map.pop_name("arg");
             result
         };
         Ok(Value::Res(Resource::new_func(Func::new_unnamed(f))))
